@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Focus Timer Overlay</title>
+
+<style>
+  :root {
+    --color-focus: #FFD700;   /* yellow — Focus phase */
+    --color-break: #00BFFF;   /* blue   — Break phase */
+    --color-session: #A855F7; /* purple — session counter */
+    --color-clock-text: #FFFFFF;
+  }
+
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  html, body {
+    background: transparent;
+    width: 100%;
+    height: 100%;
+  }
+
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: Arial, Helvetica, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    user-select: none;
+    overflow: hidden;
+  }
+
+  .overlay {
+    display: flex;
+    flex-direction: row; /* محاذاة أفقية تجعل الساعة والتاريخ بجانب المؤقت */
+    align-items: flex-end; /* جعل المحاذاة مع أدنى نقطة في المؤقت */
+    justify-content: center;
+    padding: 20px;
+    max-width: 100vw;
+    gap: 50px; /* مسافة بين المؤقت وقسم الساعة */
+  }
+
+  /* قسم المؤقت الرئيسي والجلسات */
+  .timer-section {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+
+  /* ---------- Header label ---------- */
+  .phase-label {
+    font-size: clamp(1.1rem, 3vw, 1.9rem);
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    text-shadow: 0 2px 10px rgba(0, 0, 0, 0.9), 0 0 4px rgba(0, 0, 0, 0.6);
+    transition: color 0.5s ease;
+    margin-bottom: 4px;
+    background: transparent;
+  }
+
+  .phase-label.focus { color: var(--color-focus); }
+  .phase-label.break { color: var(--color-break); }
+
+  /* ---------- Countdown timer ---------- */
+  .timer-display {
+    font-size: clamp(3.2rem, 10vw, 6.5rem);
+    font-weight: 700;
+    color: #FFFFFF;
+    line-height: 0.9; /* ضبط ارتفاع السطر لتحديد أدنى نقطة بدقة */
+    letter-spacing: 0.02em;
+    text-shadow: 0 4px 18px rgba(0, 0, 0, 0.9), 0 0 6px rgba(0, 0, 0, 0.5);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ---------- Session counter (بدون تغيير مكانه) ---------- */
+  .session-counter {
+    margin-top: 10px;
+    font-size: clamp(2.5rem, 8vw, 5rem);
+    font-weight: 700;
+    color: var(--color-session);
+    letter-spacing: 0.05em;
+    text-shadow: 0 4px 16px rgba(0, 0, 0, 0.9);
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ---------- Live clock & date (محتويات الساعة محاذية لأدنى نقطة بالمؤقت) ---------- */
+  .clock-container {
+    display: flex;
+    align-items: flex-end;
+    margin-bottom: 5px; /* إزاحة طفيفة لضبط المحاذاة مع قاع رقم المؤقت تماماً */
+  }
+
+  .clock-box {
+    display: inline-block;
+    padding: 0;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    color: #FFFFFF;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: clamp(1.2rem, 2.5vw, 1.7rem);
+    font-weight: 900;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+
+    /* الستايل المطلوب من الصورة */
+    text-shadow: 
+      2px 2px 0px #E63946, 
+      3px 3px 0px #E63946, 
+      4px 4px 0px #9D0208,
+      5px 5px 8px rgba(0, 0, 0, 0.8);
+  }
+
+  @media (max-width: 768px) {
+    .overlay {
+      flex-direction: column;
+      align-items: center;
+      gap: 25px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .phase-label { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+  <div class="overlay">
+    <!-- قسم المؤقت الرئيسي وعداد الجلسات محتفظان بمكانهما الأصلي -->
+    <div class="timer-section">
+      <div id="phaseLabel" class="phase-label focus">FOCUS TIME</div>
+      <div id="timerDisplay" class="timer-display">60:00</div>
+      <div id="sessionCounter" class="session-counter">0 | 10</div>
+    </div>
+
+    <!-- قسم التاريخ والساعة محاذى على اليمين عند أدنى نقطة في المؤقت -->
+    <div class="clock-container">
+      <span id="clockDateTime" class="clock-box"></span>
+    </div>
+  </div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ================= Configuration — edit these to customize ================= */
+  const FOCUS_MINUTES   = 60;   // Focus phase length, in minutes
+  const BREAK_MINUTES   = 10;   // Break phase length, in minutes
+  const TARGET_SESSIONS = 10;   // Daily focus-session goal shown as "x | TARGET_SESSIONS"
+  /* ============================================================================= */
+
+  const FOCUS_SECONDS = FOCUS_MINUTES * 60;
+  const BREAK_SECONDS = BREAK_MINUTES * 60;
+
+  /* ---- State ---- */
+  let phase = 'focus';                                  // 'focus' | 'break'
+  let phaseEndsAt = Date.now() + FOCUS_SECONDS * 1000;   // absolute timestamp the current phase ends
+  let completedSessions = 0;
+
+  /* ---- DOM references ---- */
+  const phaseLabelEl     = document.getElementById('phaseLabel');
+  const timerDisplayEl   = document.getElementById('timerDisplay');
+  const sessionCounterEl = document.getElementById('sessionCounter');
+  const clockDateTimeEl  = document.getElementById('clockDateTime');
+
+  /* ---- Sound Effects via Web Audio API ---- */
+  let audioCtx = null;
+
+  function initAudio() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+  }
+
+  window.addEventListener('click', initAudio, { once: true });
+
+  function playNotificationSound(type) {
+    initAudio();
+    if (!audioCtx) return;
+
+    const now = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    if (type === 'focusEnd') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(587.33, now); 
+      osc.frequency.setValueAtTime(880, now + 0.15); 
+      
+      gain.gain.setValueAtTime(0.3, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
+      
+      osc.start(now);
+      osc.stop(now + 0.6);
+    } else if (type === 'breakEnd') {
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(440, now); 
+      osc.frequency.setValueAtTime(554.37, now + 0.12); 
+      osc.frequency.setValueAtTime(659.25, now + 0.24); 
+
+      gain.gain.setValueAtTime(0.3, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.7);
+
+      osc.start(now);
+      osc.stop(now + 0.7);
+    }
+  }
+
+  function pad(n) {
+    return String(n).padStart(2, '0');
+  }
+
+  function formatCountdown(totalSeconds) {
+    const m = Math.floor(totalSeconds / 60);
+    const s = totalSeconds % 60;
+    return pad(m) + ':' + pad(s);
+  }
+
+  function renderPhase() {
+    if (phase === 'focus') {
+      phaseLabelEl.textContent = 'FOCUS TIME';
+      phaseLabelEl.className = 'phase-label focus';
+    } else {
+      phaseLabelEl.textContent = 'BREAK TIME';
+      phaseLabelEl.className = 'phase-label break';
+    }
+  }
+
+  function renderSessionCounter() {
+    sessionCounterEl.textContent = completedSessions + ' | ' + TARGET_SESSIONS;
+  }
+
+  function advancePhase() {
+    while (phaseEndsAt <= Date.now()) {
+      if (phase === 'focus') {
+        completedSessions++;
+        phase = 'break';
+        phaseEndsAt += BREAK_SECONDS * 1000;
+        playNotificationSound('focusEnd');
+      } else {
+        phase = 'focus';
+        phaseEndsAt += FOCUS_SECONDS * 1000;
+        playNotificationSound('breakEnd');
+      }
+    }
+    renderPhase();
+    renderSessionCounter();
+  }
+
+  function tickTimer() {
+    if (Date.now() >= phaseEndsAt) {
+      advancePhase();
+    }
+    const remainingMs = Math.max(0, phaseEndsAt - Date.now());
+    const remainingSeconds = Math.ceil(remainingMs / 1000);
+    timerDisplayEl.textContent = formatCountdown(remainingSeconds);
+  }
+
+  function tickClock() {
+    const now = new Date();
+    const day = pad(now.getDate());
+    const month = pad(now.getMonth() + 1);
+    const year = now.getFullYear();
+
+    let hours = now.getHours();
+    const minutes = pad(now.getMinutes());
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    hours = hours ? hours : 12;
+
+    const dateStr = month + '/' + day + '/' + year;
+    const timeStr = hours + '.' + minutes + ' ' + ampm;
+
+    clockDateTimeEl.textContent = dateStr + ' at ' + timeStr;
+  }
+
+  function loop() {
+    tickTimer();
+    tickClock();
+  }
+
+  /* ---- Init ---- */
+  renderPhase();
+  renderSessionCounter();
+  loop();
+  setInterval(loop, 1000);
+
+})();
+</script>
+
+</body>
+</html>
